@@ -355,13 +355,7 @@ jobs:
                   settings.setBuiltInZoomControls(false);
                   settings.setDisplayZoomControls(false);
 
-                  // Dukungan Service Worker untuk PWA pada WebView Android 7+
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                      ServiceWorkerController.getInstance()
-                          .getServiceWorkerWebSettings()
-                          .setJavaScriptEnabled(true);
-                  }
-
+                  
                   // Jembatan cetak tetap menggunakan fungsi lama: print()
                   webView.addJavascriptInterface(
                       new PrintBridge(),
@@ -462,8 +456,7 @@ jobs:
                   // Tempat banner AdMob di bagian bawah
                   adContainer = new FrameLayout(this);
                   adContainer.setBackgroundColor(Color.WHITE);
-                  adContainer.setGravity(Gravity.CENTER);
-
+                  
                   rootLayout.addView(
                       adContainer,
                       new LinearLayout.LayoutParams(
