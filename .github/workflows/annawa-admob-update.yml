@@ -1,8 +1,6 @@
-name: Buat APK An-Nawa
+name: Jadwal AN-NAWA - APK AdMob
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -11,355 +9,75 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       RUN_NUMBER: ${{ github.run_number }}
 
     steps:
+      # 1. Ambil seluruh repository, termasuk file PWA yang sudah ada
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 2. Java 17
       - name: Set up Java JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
+      # 3. Gradle
       - name: Setup Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Siapkan Kunci Penandatanganan
+      # 4. Siapkan keystore permanen
+      - name: Siapkan keystore untuk tanda tangan APK
+        shell: bash
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "GitHub Secret ANDROID_KEYSTORE_BASE64 belum diisi."
+          mkdir -p "$RUNNER_TEMP/annawa-signing"
+
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 belum diisi."
             exit 1
           fi
-          mkdir -p "$RUNNER_TEMP/annawa-signing"
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/annawa-signing/annawa-release.jks"
-          test -s "$RUNNER_TEMP/annawa-signing/annawa-release.jks"
-          echo "KEYSTORE_PATH=$RUNNER_TEMP/annawa-signing/annawa-release.jks" >> "$GITHUB_ENV"
 
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" \
+            | sed '/-----BEGIN CERTIFICATE-----/d; /-----END CERTIFICATE-----/d' \
+            | tr -d '\r\n ' \
+            | base64 --decode \
+            > "$RUNNER_TEMP/annawa-signing/annawa-release.jks"
+
+          if [ ! -s "$RUNNER_TEMP/annawa-signing/annawa-release.jks" ]; then
+            echo "File keystore gagal dibuat."
+            exit 1
+          fi
+
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/annawa-signing/annawa-release.jks" >> "$GITHUB_ENV"
+
+      # 5. Buat struktur aplikasi
       - name: Buat Struktur File dan Direktori APK
+        shell: bash
         run: |
           mkdir -p app/src/main/java/com/annawa/jadwal
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap
           mkdir -p app/src/main/res/mipmap-hdpi
 
           if [ -f logo.png ]; then
             cp logo.png app/src/main/res/mipmap-hdpi/ic_launcher.png
             echo "Logo pesantren berhasil disalin sebagai ikon aplikasi."
           else
-            echo "Peringatan: logo.png tidak ditemukan; pastikan ikon mipmap/ic_launcher sudah tersedia."
+            echo "logo.png tidak ditemukan. Ikon cadangan akan digunakan."
           fi
 
-          cat << 'STYLES' > app/src/main/res/values/styles.xml
-          <resources>
-              <style name="AppTheme" parent="android:Theme.NoTitleBar">
-                  <item name="android:windowFullscreen">false</item>
-                  <item name="android:windowActionModeOverlay">true</item>
-              </style>
-          </resources>
-          STYLES
-
-          cat << 'MANIFEST' > app/src/main/AndroidManifest.xml
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.annawa.jadwal">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <application
-                  android:label="Jadwal An-Nawa"
-                  android:icon="@mipmap/ic_launcher"
-                  android:roundIcon="@mipmap/ic_launcher"
-                  android:usesCleartextTraffic="true"
-                  android:hardwareAccelerated="true">
-                  <meta-data
-                      android:name="com.google.android.gms.ads.APPLICATION_ID"
-                      android:value="ca-app-pub-3143680001009952~1205948994" />
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:theme="@style/AppTheme"
-                      android:configChanges="orientation|screenSize|keyboardHidden">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          MANIFEST
-
-          cat << 'JAVA' > app/src/main/java/com/annawa/jadwal/MainActivity.java
-          package com.annawa.jadwal;
-
-          import android.app.Activity;
-          import android.app.AlertDialog;
-          import android.content.Intent;
-          import android.graphics.Color;
-          import android.net.Uri;
-          import android.os.Bundle;
-          import android.os.Handler;
-          import android.os.Looper;
-          import android.content.SharedPreferences;
-          import android.view.Gravity;
-          import android.view.ViewGroup;
-          import android.webkit.JavascriptInterface;
-          import android.webkit.DownloadListener;
-          import android.webkit.WebChromeClient;
-          import android.webkit.WebSettings;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
-          import android.print.PrintManager;
-          import android.print.PrintDocumentAdapter;
-          import android.print.PrintAttributes;
-          import android.widget.LinearLayout;
-          import android.widget.Toast;
-
-          import com.google.android.gms.ads.AdRequest;
-          import com.google.android.gms.ads.AdSize;
-          import com.google.android.gms.ads.AdView;
-          import com.google.android.gms.ads.MobileAds;
-
-          import org.json.JSONArray;
-          import org.json.JSONObject;
-
-          import java.io.BufferedReader;
-          import java.io.InputStream;
-          import java.io.InputStreamReader;
-          import java.net.HttpURLConnection;
-          import java.net.URL;
-          import java.util.concurrent.ExecutorService;
-          import java.util.concurrent.Executors;
-
-          public class MainActivity extends Activity {
-              private static final String WEBSITE_URL = "https://gunan-awa.github.io/jadwal/";
-              private static final String RELEASES_API =
-                      "https://api.github.com/repos/gunan-awa/jadwal/releases/latest";
-              private static final String[] BANNER_IDS = {
-                      "ca-app-pub-3143680001009952/2815914680",
-                      "ca-app-pub-3143680001009952/2037930346"
-              };
-
-              private WebView webView;
-              private LinearLayout adContainer;
-              private AdView adView;
-              private int bannerIndex = 0;
-              private final Handler handler = new Handler(Looper.getMainLooper());
-              private final ExecutorService networkExecutor = Executors.newSingleThreadExecutor();
-
-              private final Runnable rotateBanner = new Runnable() {
-                  @Override public void run() {
-                      if (!isFinishing() && !isDestroyed()) {
-                          bannerIndex = (bannerIndex + 1) % BANNER_IDS.length;
-                          loadBanner();
-                          handler.postDelayed(this, 60 * 1000L);
-                      }
-                  }
-              };
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setBackgroundColor(Color.WHITE);
-
-                  webView = new WebView(this);
-                  WebSettings settings = webView.getSettings();
-                  settings.setJavaScriptEnabled(true);
-                  settings.setDomStorageEnabled(true);
-                  settings.setDatabaseEnabled(true);
-                  settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-                  settings.setAllowFileAccess(true);
-                  settings.setJavaScriptCanOpenWindowsAutomatically(true);
-                  settings.setLoadsImagesAutomatically(true);
-                  webView.addJavascriptInterface(new PrintBridge(), "AndroidPrint");
-
-                  webView.setWebViewClient(new WebViewClient() {
-                      @Override public void onPageFinished(WebView view, String url) {
-                          super.onPageFinished(view, url);
-                          view.evaluateJavascript(
-                                  "window.print=function(){AndroidPrint.print();};" +
-                                  "var slot=document.getElementById('admob-banner-slot');" +
-                                  "if(slot&&slot.parentElement){slot.parentElement.remove();}", null);
-                      }
-                  });
-                  webView.setWebChromeClient(new WebChromeClient());
-                  webView.setDownloadListener(new DownloadListener() {
-                      @Override public void onDownloadStart(String url, String userAgent,
-                              String contentDisposition, String mimeType, long contentLength) {
-                          try {
-                              startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                          } catch (Exception e) {
-                              Toast.makeText(MainActivity.this,
-                                      "Tidak dapat membuka file unduhan", Toast.LENGTH_LONG).show();
-                          }
-                      }
-                  });
-
-                  root.addView(webView, new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-                  adContainer = new LinearLayout(this);
-                  adContainer.setGravity(Gravity.CENTER);
-                  adContainer.setBackgroundColor(Color.WHITE);
-                  root.addView(adContainer, new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                  setContentView(root);
-                  webView.loadUrl(WEBSITE_URL);
-
-                  MobileAds.initialize(this, status -> runOnUiThread(() -> {
-                      loadBanner();
-                      handler.removeCallbacks(rotateBanner);
-                      handler.postDelayed(rotateBanner, 60 * 1000L);
-                  }));
-                  checkForNewRelease();
-              }
-
-              private void loadBanner() {
-                  if (isFinishing() || isDestroyed() || adContainer == null) return;
-                  if (adView != null) {
-                      adContainer.removeView(adView);
-                      adView.destroy();
-                  }
-                  adView = new AdView(this);
-                  adView.setAdSize(AdSize.BANNER);
-                  adView.setAdUnitId(BANNER_IDS[bannerIndex]);
-                  adContainer.removeAllViews();
-                  adContainer.addView(adView, new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                  adView.loadAd(new AdRequest.Builder().build());
-              }
-
-              private void checkForNewRelease() {
-                  networkExecutor.execute(() -> {
-                      HttpURLConnection connection = null;
-                      try {
-                          connection = (HttpURLConnection) new URL(RELEASES_API).openConnection();
-                          connection.setRequestMethod("GET");
-                          connection.setConnectTimeout(10000);
-                          connection.setReadTimeout(10000);
-                          connection.setRequestProperty("Accept", "application/vnd.github+json");
-                          connection.setRequestProperty("User-Agent", "Jadwal-AnNawa-Android");
-                          if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return;
-
-                          StringBuilder response = new StringBuilder();
-                          try (InputStream input = connection.getInputStream();
-                               BufferedReader reader = new BufferedReader(new InputStreamReader(input))) {
-                              String line;
-                              while ((line = reader.readLine()) != null) response.append(line);
-                          }
-
-                          JSONObject release = new JSONObject(response.toString());
-                          String tag = release.optString("tag_name", "");
-                          int latestCode = versionCodeFromTag(tag);
-                          if (latestCode <= BuildConfig.VERSION_CODE) return;
-                          SharedPreferences updatePrefs = getSharedPreferences("app_updates", MODE_PRIVATE);
-                          if (tag.equals(updatePrefs.getString("last_prompted_tag", ""))) return;
-
-                          JSONArray assets = release.optJSONArray("assets");
-                          if (assets == null) return;
-                          String apkUrl = null;
-                          for (int i = 0; i < assets.length(); i++) {
-                              JSONObject asset = assets.getJSONObject(i);
-                              if (asset.optString("name", "").toLowerCase().endsWith(".apk")) {
-                                  apkUrl = asset.optString("browser_download_url", null);
-                                  break;
-                              }
-                          }
-                          if (apkUrl == null || apkUrl.isEmpty()) return;
-                          final String downloadUrl = apkUrl;
-                          final String releaseName = release.optString("name", tag);
-                          runOnUiThread(() -> showUpdateDialog(releaseName, downloadUrl, tag));
-                      } catch (Exception ignored) {
-                          // Kegagalan cek update tidak mengganggu aplikasi utama.
-                      } finally {
-                          if (connection != null) connection.disconnect();
-                      }
-                  });
-              }
-
-              private int versionCodeFromTag(String tag) {
-                  // Format tag: v2.10.N; versionCode: 20 + N.
-                  try {
-                      String[] parts = tag.replace("v", "").split("\\.");
-                      int runNumber = Integer.parseInt(parts[parts.length - 1]);
-                      return 20 + runNumber;
-                  } catch (Exception e) {
-                      return 0;
-                  }
-              }
-
-              private void showUpdateDialog(String version, String apkUrl, String tag) {
-                  if (isFinishing() || isDestroyed()) return;
-                  getSharedPreferences("app_updates", MODE_PRIVATE).edit()
-                          .putString("last_prompted_tag", tag).apply();
-                  new AlertDialog.Builder(this)
-                          .setTitle("Pembaruan Jadwal An-Nawa")
-                          .setMessage("Versi baru " + version +
-                                  " tersedia. Unduh APK terbaru untuk memperbarui aplikasi.")
-                          .setCancelable(true)
-                          .setNegativeButton("Nanti", (dialog, which) -> dialog.dismiss())
-                          .setPositiveButton("Unduh APK", (dialog, which) -> {
-                              try {
-                                  startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)));
-                              } catch (Exception e) {
-                                  Toast.makeText(this, "Tidak dapat membuka tautan unduhan",
-                                          Toast.LENGTH_LONG).show();
-                              }
-                          }).show();
-              }
-
-              private void printWebPage() {
-                  try {
-                      PrintManager manager = (PrintManager) getSystemService(PRINT_SERVICE);
-                      PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter("Jadwal-AnNawa");
-                      PrintAttributes attributes = new PrintAttributes.Builder()
-                              .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                              .setColorMode(PrintAttributes.COLOR_MODE_COLOR).build();
-                      manager.print("Jadwal An-Nawa", adapter, attributes);
-                  } catch (Exception e) {
-                      Toast.makeText(this, "Gagal membuka fitur cetak", Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              public class PrintBridge {
-                  @JavascriptInterface public void print() {
-                      runOnUiThread(() -> printWebPage());
-                  }
-              }
-
-              @Override public void onBackPressed() {
-                  if (webView != null && webView.canGoBack()) webView.goBack();
-                  else super.onBackPressed();
-              }
-
-              @Override protected void onDestroy() {
-                  handler.removeCallbacksAndMessages(null);
-                  networkExecutor.shutdownNow();
-                  if (adView != null) {
-                      adView.destroy();
-                      adView = null;
-                  }
-                  if (webView != null) {
-                      webView.destroy();
-                      webView = null;
-                  }
-                  super.onDestroy();
-              }
-          }
-          JAVA
-
-          cat << 'ROOTGRADLE' > build.gradle
-          plugins {
-              id 'com.android.application' version '8.6.1' apply false
-          }
-          ROOTGRADLE
-
-          cat << 'SETTINGS' > settings.gradle
+      # 6. Konfigurasi Gradle
+      - name: Buat Konfigurasi Gradle
+        shell: bash
+        run: |
+          cat > settings.gradle <<'EOF'
           pluginManagement {
               repositories {
                   google()
@@ -367,6 +85,7 @@ jobs:
                   gradlePluginPortal()
               }
           }
+
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -374,70 +93,812 @@ jobs:
                   mavenCentral()
               }
           }
+
           rootProject.name = "Jadwal AnNawa"
           include ':app'
-          SETTINGS
+          EOF
 
-          VERSION_CODE=$((RUN_NUMBER + 20))
-          cat << EOF > app/build.gradle
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.6.1' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
           }
+
+          def runNumber = (System.getenv("RUN_NUMBER") ?: "1").toInteger()
+
           android {
               namespace 'com.annawa.jadwal'
               compileSdk 34
+
               defaultConfig {
                   applicationId "com.annawa.jadwal"
                   minSdk 21
                   targetSdk 34
-                  versionCode ${VERSION_CODE}
-                  versionName "2.10.${RUN_NUMBER}"
+
+                  versionCode 20 + runNumber
+                  versionName "2.10.${runNumber}"
               }
+
+              buildFeatures {
+                  buildConfig true
+              }
+
               signingConfigs {
                   release {
-                      storeFile file(System.getenv("KEYSTORE_PATH"))
-                      storePassword System.getenv("KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("KEY_ALIAS")
-                      keyPassword System.getenv("KEY_PASSWORD")
+                      storeFile file(System.getenv("KEYSTORE_FILE"))
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
                   }
               }
+
               buildTypes {
                   release {
                       signingConfig signingConfigs.release
                       minifyEnabled false
                   }
               }
+
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
           }
+
           dependencies {
               implementation 'com.google.android.gms:play-services-ads:23.6.0'
           }
           EOF
 
-      - name: Build APK Release
-        env:
-          KEYSTORE_PATH: ${{ runner.temp }}/annawa-signing/annawa-release.jks
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle assembleRelease --no-daemon
+      # 7. Android Manifest
+      - name: Buat AndroidManifest
+        shell: bash
+        run: |
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+
+              <application
+                  android:allowBackup="true"
+                  android:label="Jadwal An-Nawa"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:usesCleartextTraffic="true"
+                  android:hardwareAccelerated="true"
+                  android:theme="@style/AppTheme">
+
+                  <meta-data
+                      android:name="com.google.android.gms.ads.APPLICATION_ID"
+                      android:value="ca-app-pub-3143680001009952~1205948994" />
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:theme="@style/AppTheme"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      # 8. Tema aplikasi
+      - name: Buat Tema Tampilan
+        shell: bash
+        run: |
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:windowFullscreen">false</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#087A45</item>
+                  <item name="android:statusBarColor">#075B35</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:windowLightStatusBar">false</item>
+              </style>
+          </resources>
+          EOF
+
+      # 9. Ikon cadangan jika logo.png tidak tersedia
+      - name: Buat Ikon Cadangan Aplikasi
+        shell: bash
+        run: |
+          cat > app/src/main/res/mipmap/ic_launcher.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="48dp"
+              android:height="48dp"
+              android:viewportWidth="48"
+              android:viewportHeight="48">
+
+              <path
+                  android:fillColor="#075B35"
+                  android:pathData="M0,0h48v48h-48z" />
+
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M24,7 L39,16 L39,32 L24,41 L9,32 L9,16 Z" />
+
+              <path
+                  android:fillColor="#087A45"
+                  android:pathData="M15,17h18v3h-18z M15,23h18v3h-18z M15,29h12v3h-12z" />
+
+          </vector>
+          EOF
+
+      # 10. MainActivity
+      - name: Buat MainActivity
+        shell: bash
+        run: |
+          cat > app/src/main/java/com/annawa/jadwal/MainActivity.java <<'EOF'
+          package com.annawa.jadwal;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.os.Build;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.print.PrintAttributes;
+          import android.print.PrintDocumentAdapter;
+          import android.print.PrintManager;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.DownloadListener;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.webkit.ServiceWorkerController;
+          import android.widget.LinearLayout;
+          import android.widget.FrameLayout;
+          import android.view.Gravity;
+          import android.view.ViewGroup;
+          import android.widget.Toast;
+
+          import com.google.android.gms.ads.AdRequest;
+          import com.google.android.gms.ads.AdSize;
+          import com.google.android.gms.ads.AdView;
+          import com.google.android.gms.ads.MobileAds;
+
+          import org.json.JSONObject;
+          import org.json.JSONArray;
+
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.io.BufferedReader;
+          import java.io.InputStreamReader;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+
+          public class MainActivity extends Activity {
+
+              private WebView webView;
+              private LinearLayout rootLayout;
+              private FrameLayout adContainer;
+              private AdView adView;
+
+              private final Handler handler =
+                      new Handler(Looper.getMainLooper());
+
+              private final ExecutorService executor =
+                      Executors.newSingleThreadExecutor();
+
+              private int currentAd = 0;
+
+              private final String[] bannerIds = {
+                  "ca-app-pub-3143680001009952/2815914680",
+                  "ca-app-pub-3143680001009952/2037930346"
+              };
+
+              private final String websiteUrl =
+                      "https://gunan-awa.github.io/jadwal/";
+
+              private final String releaseApi =
+                      "https://api.github.com/repos/gunan-awa/jadwal/releases/latest";
+
+              private final String currentVersion =
+                      BuildConfig.VERSION_NAME;
+
+              private final Runnable rotateAd = new Runnable() {
+                  @Override
+                  public void run() {
+                      if (isFinishing() || isDestroyed()) return;
+
+                      currentAd = (currentAd + 1) % bannerIds.length;
+                      loadBanner();
+
+                      handler.postDelayed(this, 60000);
+                  }
+              };
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().setStatusBarColor(Color.rgb(7, 91, 53));
+
+                  rootLayout = new LinearLayout(this);
+                  rootLayout.setOrientation(LinearLayout.VERTICAL);
+                  rootLayout.setBackgroundColor(Color.WHITE);
+
+                  webView = new WebView(this);
+                  webView.setBackgroundColor(Color.WHITE);
+
+                  WebSettings settings = webView.getSettings();
+
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+                  settings.setAllowFileAccess(true);
+                  settings.setAllowContentAccess(true);
+                  settings.setJavaScriptCanOpenWindowsAutomatically(true);
+                  settings.setLoadsImagesAutomatically(true);
+                  settings.setSupportMultipleWindows(false);
+                  settings.setBuiltInZoomControls(false);
+                  settings.setDisplayZoomControls(false);
+
+                  // Dukungan Service Worker untuk PWA pada WebView Android 7+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                      ServiceWorkerController.getInstance()
+                          .getServiceWorkerWebSettings()
+                          .setJavaScriptEnabled(true);
+                  }
+
+                  // Jembatan cetak tetap menggunakan fungsi lama: print()
+                  webView.addJavascriptInterface(
+                      new PrintBridge(),
+                      "AndroidPrint"
+                  );
+
+                  webView.setWebChromeClient(new WebChromeClient());
+
+                  webView.setWebViewClient(new WebViewClient() {
+
+                      @Override
+                      public void onPageFinished(WebView view, String url) {
+                          super.onPageFinished(view, url);
+
+                          String js =
+                              "(function() {" +
+                              "try {" +
+                              "var slot=document.getElementById('admob-banner-slot');" +
+                              "if(slot){slot.remove();}" +
+                              "window.print=function(){" +
+                              "AndroidPrint.print();" +
+                              "};" +
+                              "} catch(e) {}" +
+                              "})();";
+
+                          view.evaluateJavascript(js, null);
+                      }
+
+                      @Override
+                      public boolean shouldOverrideUrlLoading(
+                              WebView view,
+                              String url
+                      ) {
+                          if (url == null) return false;
+
+                          if (url.startsWith("http://") ||
+                              url.startsWith("https://")) {
+
+                              if (url.contains("gunan-awa.github.io/jadwal")) {
+                                  return false;
+                              }
+
+                              try {
+                                  Intent intent = new Intent(
+                                      Intent.ACTION_VIEW,
+                                      Uri.parse(url)
+                                  );
+
+                                  startActivity(intent);
+                                  return true;
+
+                              } catch (Exception e) {
+                                  return false;
+                              }
+                          }
+
+                          return false;
+                      }
+                  });
+
+                  // Fitur unduhan dari workflow lama tetap dipertahankan
+                  webView.setDownloadListener(new DownloadListener() {
+                      @Override
+                      public void onDownloadStart(
+                              String url,
+                              String userAgent,
+                              String contentDisposition,
+                              String mimeType,
+                              long contentLength
+                      ) {
+                          try {
+                              Intent intent = new Intent(
+                                  Intent.ACTION_VIEW,
+                                  Uri.parse(url)
+                              );
+
+                              startActivity(intent);
+
+                          } catch (Exception e) {
+                              Toast.makeText(
+                                  MainActivity.this,
+                                  "Tidak dapat membuka file unduhan",
+                                  Toast.LENGTH_LONG
+                              ).show();
+                          }
+                      }
+                  });
+
+                  rootLayout.addView(
+                      webView,
+                      new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          0,
+                          1
+                      )
+                  );
+
+                  // Tempat banner AdMob di bagian bawah
+                  adContainer = new FrameLayout(this);
+                  adContainer.setBackgroundColor(Color.WHITE);
+                  adContainer.setGravity(Gravity.CENTER);
+
+                  rootLayout.addView(
+                      adContainer,
+                      new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      )
+                  );
+
+                  setContentView(rootLayout);
+
+                  webView.loadUrl(websiteUrl);
+
+                  // Inisialisasi AdMob
+                  MobileAds.initialize(this, initializationStatus -> {
+                      runOnUiThread(() -> {
+                          if (isFinishing() || isDestroyed()) return;
+
+                          loadBanner();
+
+                          handler.removeCallbacks(rotateAd);
+                          handler.postDelayed(rotateAd, 60000);
+                      });
+                  });
+
+                  // Periksa pembaruan APK
+                  checkForUpdate();
+              }
+
+              // ==============================
+              // ADMOB BANNER
+              // ==============================
+
+              private void loadBanner() {
+                  if (isFinishing() || isDestroyed()) return;
+                  if (adContainer == null) return;
+
+                  adContainer.removeAllViews();
+
+                  if (adView != null) {
+                      adView.destroy();
+                      adView = null;
+                  }
+
+                  adView = new AdView(this);
+                  adView.setAdUnitId(bannerIds[currentAd]);
+                  adView.setAdSize(AdSize.BANNER);
+
+                  adContainer.addView(
+                      adView,
+                      new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT,
+                          Gravity.CENTER
+                      )
+                  );
+
+                  AdRequest request = new AdRequest.Builder().build();
+                  adView.loadAd(request);
+              }
+
+              // ==============================
+              // CETAK DAN PDF A4
+              // ==============================
+
+              private void printWebPage() {
+                  try {
+                      PrintManager printManager =
+                          (PrintManager) getSystemService(
+                              Context.PRINT_SERVICE
+                          );
+
+                      if (printManager == null) {
+                          Toast.makeText(
+                              MainActivity.this,
+                              "Layanan cetak tidak tersedia",
+                              Toast.LENGTH_LONG
+                          ).show();
+                          return;
+                      }
+
+                      PrintDocumentAdapter adapter =
+                          webView.createPrintDocumentAdapter(
+                              "Jadwal-AnNawa"
+                          );
+
+                      PrintAttributes attributes =
+                          new PrintAttributes.Builder()
+                              .setMediaSize(
+                                  PrintAttributes.MediaSize.ISO_A4
+                              )
+                              .setColorMode(
+                                  PrintAttributes.COLOR_MODE_COLOR
+                              )
+                              .build();
+
+                      printManager.print(
+                          "Jadwal An-Nawa",
+                          adapter,
+                          attributes
+                      );
+
+                  } catch (Exception e) {
+                      Toast.makeText(
+                          MainActivity.this,
+                          "Gagal membuka fitur cetak",
+                          Toast.LENGTH_LONG
+                      ).show();
+                  }
+              }
+
+              // Jembatan JavaScript tetap sesuai workflow lama
+              public class PrintBridge {
+
+                  @JavascriptInterface
+                  public void print() {
+                      runOnUiThread(() -> {
+                          printWebPage();
+                      });
+                  }
+              }
+
+              // ==============================
+              // PEMERIKSAAN PEMBARUAN APK
+              // ==============================
+
+              private void checkForUpdate() {
+                  executor.execute(() -> {
+
+                      HttpURLConnection connection = null;
+
+                      try {
+                          URL url = new URL(releaseApi);
+
+                          connection =
+                              (HttpURLConnection) url.openConnection();
+
+                          connection.setRequestMethod("GET");
+                          connection.setConnectTimeout(10000);
+                          connection.setReadTimeout(10000);
+
+                          connection.setRequestProperty(
+                              "Accept",
+                              "application/vnd.github+json"
+                          );
+
+                          connection.setRequestProperty(
+                              "User-Agent",
+                              "Jadwal-AN-NAWA-Android"
+                          );
+
+                          int responseCode =
+                              connection.getResponseCode();
+
+                          if (responseCode != 200) return;
+
+                          BufferedReader reader =
+                              new BufferedReader(
+                                  new InputStreamReader(
+                                      connection.getInputStream()
+                                  )
+                              );
+
+                          StringBuilder response =
+                              new StringBuilder();
+
+                          String line;
+
+                          while ((line = reader.readLine()) != null) {
+                              response.append(line);
+                          }
+
+                          reader.close();
+
+                          JSONObject release =
+                              new JSONObject(response.toString());
+
+                          String tag =
+                              release.optString("tag_name", "");
+
+                          String releaseName =
+                              release.optString(
+                                  "name",
+                                  "Pembaruan Jadwal AN-NAWA"
+                              );
+
+                          JSONArray assets =
+                              release.optJSONArray("assets");
+
+                          if (tag.isEmpty() || assets == null) return;
+
+                          String apkUrl = "";
+
+                          for (int i = 0; i < assets.length(); i++) {
+
+                              JSONObject asset =
+                                  assets.getJSONObject(i);
+
+                              String assetName =
+                                  asset.optString("name", "");
+
+                              if (assetName.toLowerCase().endsWith(".apk")) {
+                                  apkUrl = asset.optString(
+                                      "browser_download_url",
+                                      ""
+                                  );
+
+                                  break;
+                              }
+                          }
+
+                          if (apkUrl.isEmpty()) return;
+
+                          int remoteCode = versionCodeFromTag(tag);
+                          int localCode = BuildConfig.VERSION_CODE;
+
+                          if (remoteCode <= localCode) return;
+
+                          android.content.SharedPreferences prefs =
+                              getSharedPreferences(
+                                  "annawa_update",
+                                  MODE_PRIVATE
+                              );
+
+                          String lastPrompted =
+                              prefs.getString(
+                                  "last_prompted_tag",
+                                  ""
+                              );
+
+                          if (tag.equals(lastPrompted)) return;
+
+                          final String finalApkUrl = apkUrl;
+                          final String finalTag = tag;
+                          final String finalName = releaseName;
+
+                          runOnUiThread(() -> {
+
+                              if (isFinishing() || isDestroyed()) return;
+
+                              new AlertDialog.Builder(MainActivity.this)
+                                  .setTitle("Pembaruan Aplikasi")
+
+                                  .setMessage(
+                                      finalName +
+                                      "\nVersi terbaru: " + finalTag +
+                                      "\n\nVersi baru Jadwal AN-NAWA tersedia. " +
+                                      "Silakan unduh dan pasang pembaruan."
+                                  )
+
+                                  .setCancelable(false)
+
+                                  .setPositiveButton(
+                                      "Unduh",
+                                      (dialog, which) -> {
+
+                                          prefs.edit()
+                                              .putString(
+                                                  "last_prompted_tag",
+                                                  finalTag
+                                              )
+                                              .apply();
+
+                                          try {
+                                              Intent intent =
+                                                  new Intent(
+                                                      Intent.ACTION_VIEW,
+                                                      Uri.parse(finalApkUrl)
+                                                  );
+
+                                              startActivity(intent);
+
+                                          } catch (Exception e) {
+                                              Toast.makeText(
+                                                  MainActivity.this,
+                                                  "Tidak dapat membuka tautan unduhan",
+                                                  Toast.LENGTH_LONG
+                                              ).show();
+                                          }
+                                      }
+                                  )
+
+                                  .setNegativeButton(
+                                      "Nanti",
+                                      (dialog, which) -> {
+
+                                          prefs.edit()
+                                              .putString(
+                                                  "last_prompted_tag",
+                                                  finalTag
+                                              )
+                                              .apply();
+                                      }
+                                  )
+
+                                  .show();
+                          });
+
+                      } catch (Exception e) {
+
+                          android.util.Log.e(
+                              "ANNAWA_UPDATE",
+                              "Pemeriksaan pembaruan gagal",
+                              e
+                          );
+
+                      } finally {
+
+                          if (connection != null) {
+                              connection.disconnect();
+                          }
+                      }
+                  });
+              }
+
+              // Mengubah tag v2.10.N menjadi versionCode 20 + N
+              private int versionCodeFromTag(String tag) {
+                  try {
+                      String clean = tag.startsWith("v")
+                          ? tag.substring(1)
+                          : tag;
+
+                      String[] parts = clean.split("\\.");
+
+                      if (parts.length < 3) return 0;
+
+                      return 20 + Integer.parseInt(parts[2]);
+
+                  } catch (Exception e) {
+                      return 0;
+                  }
+              }
+
+              // ==============================
+              // TOMBOL KEMBALI
+              // ==============================
+
+              @Override
+              public void onBackPressed() {
+                  if (webView != null && webView.canGoBack()) {
+                      webView.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+
+              // ==============================
+              // SIKLUS HIDUP ADMOB
+              // ==============================
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+
+                  if (adView != null) {
+                      adView.resume();
+                      handler.removeCallbacks(rotateAd);
+                      handler.postDelayed(rotateAd, 60000);
+                  }
+              }
+
+              @Override
+              protected void onPause() {
+                  handler.removeCallbacks(rotateAd);
+
+                  if (adView != null) {
+                      adView.pause();
+                  }
+
+                  super.onPause();
+              }
+
+              // ==============================
+              // HAPUS RESOURCE SAAT APLIKASI DITUTUP
+              // ==============================
+
+              @Override
+              protected void onDestroy() {
+                  handler.removeCallbacks(rotateAd);
+
+                  if (adView != null) {
+                      adView.destroy();
+                      adView = null;
+                  }
+
+                  if (webView != null) {
+                      webView.stopLoading();
+                      webView.destroy();
+                      webView = null;
+                  }
+
+                  executor.shutdownNow();
+
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      # 11. Build APK Release dengan tanda tangan permanen
+      - name: Build APK Release
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_PASSWORD" ] ||
+             [ -z "$ANDROID_KEY_ALIAS" ] ||
+             [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "Secret tanda tangan APK belum lengkap."
+            exit 1
+          fi
+
+          gradle assembleRelease --no-daemon
+
+      # 12. Simpan APK hasil build
       - name: Unggah APK sebagai Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Jadwal-AnNawa-Ringan
+          name: Jadwal-AN-NAWA-APK
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
 
-      - name: Buat GitHub Release untuk Update Aplikasi
+      # 13. Buat GitHub Release untuk pembaruan aplikasi
+      - name: Buat GitHub Release dan Unggah APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.10.${{ github.run_number }}
-          name: Jadwal An-Nawa 2.10.${{ github.run_number }}
-          generate_release_notes: true
+          name: Jadwal AN-NAWA v2.10.${{ github.run_number }}
+          body: |
+            Pembaruan aplikasi Jadwal AN-NAWA.
+
+            APK telah dibuat dan ditandatangani dengan keystore resmi aplikasi.
           files: app/build/outputs/apk/release/app-release.apk
-          fail_on_unmatched_files: true
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
