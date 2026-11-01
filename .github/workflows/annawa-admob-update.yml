@@ -354,6 +354,8 @@ jobs:
                   settings.setSupportMultipleWindows(false);
                   settings.setBuiltInZoomControls(false);
                   settings.setDisplayZoomControls(false);
+                  settings.setUseWideViewPort(true);
+                  settings.setLoadWithOverviewMode(false);
 
                   
                   // Jembatan cetak tetap menggunakan fungsi lama: print()
