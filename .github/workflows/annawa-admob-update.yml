@@ -860,8 +860,8 @@ jobs:
               }
           }
           EOF
-       - name: Aktifkan AndroidX
-         run: |
+      - name: Aktifkan AndroidX
+        run: |
           echo "android.useAndroidX=true" >> gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
           
