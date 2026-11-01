@@ -860,7 +860,11 @@ jobs:
               }
           }
           EOF
-
+       - name: Aktifkan AndroidX
+        run: |
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+          
       # 11. Build APK Release dengan tanda tangan permanen
       - name: Build APK Release
         shell: bash
