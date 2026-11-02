@@ -403,11 +403,27 @@ body > footer { background:var(--green-dark);color:#e5f1e9;text-align:center;pad
     margin-top: 5px !important;
   }
 
-  /* Tombol Home di tengah */
-  body[data-view="beranda"] .header-inner > div.no-print {
-    align-self: center !important;
-  }
+  /* Posisi logo di tengah dan tombol Home di sebelah kanan */
+body[data-view="beranda"] .header-inner {
+  position: relative !important;
+}
 
+body[data-view="beranda"] .header-inner > div:first-child {
+  width: 100% !important;
+}
+
+body[data-view="beranda"] .header-inner > div.no-print {
+  position: absolute !important;
+  top: 16px !important;
+  right: 12px !important;
+  align-self: auto !important;
+}
+
+body[data-view="beranda"] .header-inner > div.no-print > button {
+  padding: 8px 10px !important;
+  font-size: 12px !important;
+}
+ 
   /* KONTEN BERANDA */
   body[data-view="beranda"] #berandaView {
     padding: 16px 12px !important;
