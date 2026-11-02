@@ -458,7 +458,6 @@ jobs:
                   // Tempat banner AdMob di bagian bawah
                   adContainer = new FrameLayout(this);
                   adContainer.setBackgroundColor(Color.WHITE);
-                  adContainer.setGravity(Gravity.CENTER);
                   
                   // Sediakan ruang tetap 50dp untuk banner AdMob
                   int adHeight = (int) (50 * getResources()
