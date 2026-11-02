@@ -458,12 +458,17 @@ jobs:
                   // Tempat banner AdMob di bagian bawah
                   adContainer = new FrameLayout(this);
                   adContainer.setBackgroundColor(Color.WHITE);
+                  adContainer.setGravity(Gravity.CENTER);
+                  
+                  // Sediakan ruang tetap 50dp untuk banner AdMob
+                  int adHeight = (int) (50 * getResources()
+                  .getDisplayMetrics().density + 0.5f);
                   
                   rootLayout.addView(
                       adContainer,
                       new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT,
-                          ViewGroup.LayoutParams.WRAP_CONTENT
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      adHeight
                       )
                   );
 
@@ -480,6 +485,7 @@ jobs:
 
                           handler.removeCallbacks(rotateAd);
                           handler.postDelayed(rotateAd, 60000);
+                          
                       });
                   });
 
@@ -505,16 +511,37 @@ jobs:
                   adView = new AdView(this);
                   adView.setAdUnitId(bannerIds[currentAd]);
                   adView.setAdSize(AdSize.BANNER);
-
-                  adContainer.addView(
-                      adView,
-                      new FrameLayout.LayoutParams(
-                          ViewGroup.LayoutParams.WRAP_CONTENT,
-                          ViewGroup.LayoutParams.WRAP_CONTENT,
-                          Gravity.CENTER
-                      )
-                  );
-
+                  
+                  adView.setAdListener(
+                  new com.google.android.gms.ads.AdListener() {
+                  @Override
+                  public void onAdLoaded() {
+                     android.util.Log.d("ADMOB", "Banner berhasil dimuat");
+                  }
+                  
+                  @Override
+                  public void onAdFailedToLoad(
+                     com.google.android.gms.ads.LoadAdError error
+                  ) {
+                     android.util.Log.e(
+                         "ADMOB",
+                         "Banner gagal dimuat: "
+                             + error.getCode()
+                             + " - "
+                             + error.getMessage()
+                      );
+                   }
+               }
+           );
+           // Masukkan banner ke area AdMob  
+           adContainer.addView(
+               adView,
+               new FrameLayout.LayoutParams(
+                   ViewGroup.LayoutParams.WRAP_CONTENT,
+                   ViewGroup.LayoutParams.WRAP_CONTENT,
+                   Gravity.CENTER
+               )
+           );
                   AdRequest request = new AdRequest.Builder().build();
                   adView.loadAd(request);
               }
